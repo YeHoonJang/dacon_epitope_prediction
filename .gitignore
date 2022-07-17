@@ -3,6 +3,7 @@
 
 # Data
 data/
+hub/
 *.csv
 *.txt
 
