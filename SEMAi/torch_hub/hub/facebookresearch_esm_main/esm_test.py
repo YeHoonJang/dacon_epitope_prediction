@@ -35,10 +35,12 @@ class ESMClassification(nn.Module):
         logits = self.classifier(outputs)  # [128, max, 2]
         # output = self.fc(logits[:, -1, :]).view(-1)
         output = self.sigmoid(logits) # [128, max, 2]
+        pdb.set_trace()
+        # output = torch.topk(output[:, 0, :], 1).indices
 
-        # pdb.set_trace()
+        pdb.set_trace()
         # return SequenceClassifierOutput(logits=logits)
-        return output
+        return output.mean(dim=1)
 
 # class MaskedMSELoss(torch.nn.Module):
 #     def __init__(self):
@@ -67,7 +69,7 @@ def train_epoch(model, data_loader, criterion, optimizer, device):
             y = y.to(torch.float32).to(device)
             # pdb.set_trace()
             output = model(x)
-            output = torch.topk(output[:, 0, :], 1).indices.view(-1).to(torch.float32).requires_grad_()
+            # topk = torch.topk(output[:, 0, :], 1).indices.view(-1).to(torch.float32)
             # output = torch.topk(output, 1).indices.view(-1).to(torch.float32)
             # pdb.set_trace()
             loss = criterion(output, y)
@@ -98,7 +100,7 @@ def evaluate(model, data_loader, criterion, device):
             y = y.to(torch.float32).to(device)
 
             output = model(x)
-            output = torch.topk(output[:, 0, :], 1).indices.view(-1).to(torch.float32)
+            # output = torch.topk(output[:, 0, :], 1).indices.view(-1).to(torch.float32)
             loss = criterion(output, y)
             loss_value = loss.item()
             valid_loss += loss_value
@@ -170,14 +172,12 @@ for epoch in range(start_epoch, epochs):
     print(f"Epoch: {epoch}")
 
     train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
-    print(f"Training Loss: {train_loss:.5f}")
     # pdb.set_trace()
 
     valid_loss, label, pred = evaluate(model, valid_loader, criterion, device)
     # pdb.set_trace()
     valid_f1 = f1_score(label.cpu(), pred.cpu(), average='macro')
-    print(f"Validation Loss: {valid_loss:.5f}")
-    print(f"F1 Score: {valid_f1:.5f}")
+    print(f"Training Loss: {train_loss:.5f} | Validation Loss: {valid_loss:.5f} | F1 Score: {valid_f1:.5f}\n")
 
 chkpt_path = '/home/yehoon/workspace/dacon_epitope_prediction/SEMAi/data/checkpoint/esm_test.chkpt'
 torch.save(model.state_dict(), chkpt_path)
