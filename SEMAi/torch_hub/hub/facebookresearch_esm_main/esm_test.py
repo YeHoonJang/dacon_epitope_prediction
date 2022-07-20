@@ -1,3 +1,12 @@
+import os
+import pdb
+import esm
+import tqdm
+import pickle
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
@@ -7,14 +16,6 @@ from transformers.modeling_outputs import SequenceClassifierOutput
 from transformers import Trainer
 from sklearn.metrics import f1_score
 
-import esm
-
-import pdb
-import tqdm
-import pickle
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 
 
 class ESMClassification(nn.Module):
@@ -25,30 +26,32 @@ class ESMClassification(nn.Module):
 
         self.model, self.alphabet = esm.pretrained.esm1b_t33_650M_UR50S()
         self.classifier = nn.Linear(1280, self.num_labels)
+        self.fc = nn.Linear(self.num_labels, 1)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, token_ids):
         outputs = self.model.forward(token_ids, repr_layers=[33])['representations'][33]
         outputs = outputs[:, :, :]
-        logits = self.classifier(outputs)
-        pdb.set_trace()
-        logits = self.sigmoid(logits)
+        logits = self.classifier(outputs)  # [128, max, 2]
+        # output = self.fc(logits[:, -1, :]).view(-1)
+        output = self.sigmoid(logits) # [128, max, 2]
 
+        # pdb.set_trace()
         # return SequenceClassifierOutput(logits=logits)
-        return logits
+        return output
 
-class MaskedMSELoss(torch.nn.Module):
-    def __init__(self):
-        super(MaskedMSELoss, self).__init__()
-
-    def forward(self, inputs, target, mask):
-        diff2 = (torch.flatten(inputs[:,:,1]) - torch.flatten(target)) ** 2.0 * torch.flatten(mask)
-        result = torch.sum(diff2) / torch.sum(mask)
-        if torch.sum(mask)==0:
-            return torch.sum(diff2)
-        else:
-            #print('loss:', result)
-            return result
+# class MaskedMSELoss(torch.nn.Module):
+#     def __init__(self):
+#         super(MaskedMSELoss, self).__init__()
+#
+#     def forward(self, inputs, target, mask):
+#         diff2 = (torch.flatten(inputs[:,:,1]) - torch.flatten(target)) ** 2.0 * torch.flatten(mask)
+#         result = torch.sum(diff2) / torch.sum(mask)
+#         if torch.sum(mask)==0:
+#             return torch.sum(diff2)
+#         else:
+#             #print('loss:', result)
+#             return result
 
 
 def train_epoch(model, data_loader, criterion, optimizer, device):
@@ -61,13 +64,16 @@ def train_epoch(model, data_loader, criterion, optimizer, device):
     with tqdm.tqdm(total=total) as pbar:
         for _, (x, y) in enumerate(data_loader):
             x = x.to(device)
-            y = y.to(device)
-            pdb.set_trace()
+            y = y.to(torch.float32).to(device)
+            # pdb.set_trace()
             output = model(x)
-            output = torch.topk(output, 1)
+            output = torch.topk(output[:, 0, :], 1).indices.view(-1).to(torch.float32).requires_grad_()
+            # output = torch.topk(output, 1).indices.view(-1).to(torch.float32)
+            # pdb.set_trace()
             loss = criterion(output, y)
             loss_value = loss.item()
             train_loss += loss_value
+            # pdb.set_trace()
 
             optimizer.zero_grad()
             loss.backward()
@@ -80,17 +86,19 @@ def train_epoch(model, data_loader, criterion, optimizer, device):
 @torch.no_grad()    #no autograd (backpropagation X)
 def evaluate(model, data_loader, criterion, device):
     model.eval()
-    criterion.eval()
+    # criterion.eval()
 
     valid_loss = 0.0
     total = len(data_loader)
 
     with tqdm.tqdm(total=total) as pbar:
         for _, (x, y) in enumerate(data_loader):
+            # pdb.set_trace()
             x = x.to(device)
-            y = y.to(device)
+            y = y.to(torch.float32).to(device)
 
             output = model(x)
+            output = torch.topk(output[:, 0, :], 1).indices.view(-1).to(torch.float32)
             loss = criterion(output, y)
             loss_value = loss.item()
             valid_loss += loss_value
@@ -104,7 +112,6 @@ class CustomDataset(Dataset):
     # 반드시 init, len, getitem 구현
     def __init__(self, data, alphabet):
         # 빈 리스트 생성 <- 데이터 저장
-        # TODO 여기부터
         self.X = data['epitope_seq'].str.split('').apply(lambda x:[alphabet.get_idx(x[i]) for i in range(1, len(x)-1)]).apply(lambda x: x[:14]).apply(lambda x: np.pad(x, (0,14-len(x)), 'constant', constant_values=(1)))  # sequence
         self.y = data['label']          # label
 
@@ -133,27 +140,27 @@ train_file = '/home/yehoon/workspace/dacon_epitope_prediction/SEMAi/data/train_d
 
 data = pd.read_csv(train_file)
 
-train_data = data.iloc[:int(len(data)*0.8), :]
-valid_data = data.iloc[int(len(data)*0.8):, :]
+train_data = data.iloc[:int(len(data)*0.8), :].reset_index(drop=True)
+valid_data = data.iloc[int(len(data)*0.8):, :].reset_index(drop=True)
 
 
 # with open(test_file, 'rb') as handle:
 #     test_data = pickle.load(handle)
-pdb.set_trace()
+# pdb.set_trace()
 
 train_data = CustomDataset(train_data, alphabet)
 valid_data = CustomDataset(valid_data, alphabet)
 
 # train_batch_labels, train_batch_strs, train_batch_tokens = batch_converter(train_data)
 # test_batch_labels, test_batch_strs, test_batch_tokens = batch_converter(test_data)
-pdb.set_trace()
+# pdb.set_trace()
 
-batch_size = 16
-train_loader = DataLoader(train_data, batch_size=batch_size, drop_last=True, num_workers=8)    # drop_last = drop the last incomplete batch
-valid_loader = DataLoader(valid_data, batch_size=batch_size, drop_last=True, num_workers=8)
+batch_size = 128
+train_loader = DataLoader(train_data, batch_size=batch_size, drop_last=True, num_workers=2)    # drop_last = drop the last incomplete batch
+valid_loader = DataLoader(valid_data, batch_size=batch_size, drop_last=True, num_workers=2)
 
 model = ESMClassification().to(device)
-criterion = nn.MSELoss()
+criterion = nn.BCELoss()
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
 
 start_epoch = 0
@@ -161,14 +168,19 @@ epochs = 10
 print("Start Training...!")
 for epoch in range(start_epoch, epochs):
     print(f"Epoch: {epoch}")
+
     train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
-    valid_loss, label, pred = evaluate(model, valid_loader, criterion, device)
-
-    valid_f1 = f1_score(label, pred, average='macro')
-
     print(f"Training Loss: {train_loss:.5f}")
+    # pdb.set_trace()
+
+    valid_loss, label, pred = evaluate(model, valid_loader, criterion, device)
+    # pdb.set_trace()
+    valid_f1 = f1_score(label.cpu(), pred.cpu(), average='macro')
     print(f"Validation Loss: {valid_loss:.5f}")
     print(f"F1 Score: {valid_f1:.5f}")
+
+chkpt_path = '/home/yehoon/workspace/dacon_epitope_prediction/SEMAi/data/checkpoint/esm_test.chkpt'
+torch.save(model.state_dict(), chkpt_path)
 
 
 
