@@ -114,7 +114,7 @@ class CustomDataset(Dataset):
     # 반드시 init, len, getitem 구현
     def __init__(self, data, alphabet):
         # 빈 리스트 생성 <- 데이터 저장
-        self.X = data['epitope_seq'].str.split('').apply(lambda x:[alphabet.get_idx(x[i]) for i in range(1, len(x)-1)]).apply(lambda x: x[:14]).apply(lambda x: np.pad(x, (0,14-len(x)), 'constant', constant_values=(1)))  # sequence
+        self.X = data['epitope_seq'].str.split('').apply(lambda x:[alphabet.get_idx(x[i]) for i in range(1, len(x)-1)]).apply(lambda x: x[:100]).apply(lambda x: np.pad(x, (0,100-len(x)), 'constant', constant_values=(1)))  # sequence
         self.y = data['label']          # label
 
     def __len__(self):
@@ -157,7 +157,7 @@ valid_data = CustomDataset(valid_data, alphabet)
 # test_batch_labels, test_batch_strs, test_batch_tokens = batch_converter(test_data)
 # pdb.set_trace()
 
-batch_size = 128
+batch_size = 50
 train_loader = DataLoader(train_data, batch_size=batch_size, drop_last=True, num_workers=2)    # drop_last = drop the last incomplete batch
 valid_loader = DataLoader(valid_data, batch_size=batch_size, drop_last=True, num_workers=2)
 
